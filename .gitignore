@@ -1,0 +1,18 @@
+# Ignore lockfiles
+**/#*
+
+# Ignore all symlinks in all folders
+**/*~
+
+
+
+# remove org files from tracking
+org-time-tracker.org
+org-time-tracker-tests.org
+
+Makefile.*
+
+/.eldev
+Eldev-local
+
+test/quickcheck-copy.el
