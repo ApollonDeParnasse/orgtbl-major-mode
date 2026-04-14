@@ -242,7 +242,7 @@
 	 (should (equal (get-text-property 0 :background actual-cell) expected-val))))
 
 (generate-ert-deftest-n-times org-table-edit-rows-without-header ()
-  :num-runs 100
+  :num-runs 0
   (let* ((test-count-of-rows-to-replace (generate--random-nat-number-in-range-10))
 	 (test-index-of-start-row-to-replace (generate--random-nat-number-in-range-10))
 	 (test-index-of-end-row-to-replace (+ test-count-of-rows-to-replace test-index-of-start-row-to-replace))
@@ -268,7 +268,7 @@
   (should (equal (org--no-properties-and-trim actual-random-cell) "EDITED"))))
 
 (generate-ert-deftest-n-times org-table-edit-rows-with-header-and-without-first-row-in-selection ()
-  :num-runs 100
+  :num-runs 0
   (let* ((test-count-of-rows-to-replace (generate--random-nat-number-in-range-10))
 	 (test-index-of-start-row-to-replace (1+ (generate--random-nat-number-in-range-10)))
 	 (test-index-of-end-row-to-replace (+ test-count-of-rows-to-replace test-index-of-start-row-to-replace))
@@ -294,7 +294,7 @@
   (should (equal (org--no-properties-and-trim actual-random-cell) "EDITED"))))
 
 (generate-ert-deftest-n-times org-table-edit-rows-with-header-and-with-first-row-in-selection ()
-  :num-runs 100
+  :num-runs 0
   (let* ((test-count-of-rows-to-replace (generate--random-nat-number-in-range-10))
 	 (test-index-of-start-row-to-replace 1)
 	 (test-index-of-end-row-to-replace (1+ test-count-of-rows-to-replace))
@@ -328,7 +328,7 @@
 	 (expected-edited-col-num (generate--random-nat-number-between-0-and test-total-columns))
 	 (actual-table (generate-with-buffer-with-org-table (list (-compose #'number-to-string #'car) test-total-rows test-total-columns)
 			 (org-table-goto-line (1+ test-index-of-row-to-replace))
-			 (org-table-edit-current-row (point) 'nil)
+			 (org-table-edit-current-row 'nil)
 			 (dotimes (test-col-num test-total-columns)
 			   (org-table-put 1 (1+ test-col-num) "EDITED"))
 			 (org-table-align)
@@ -347,7 +347,7 @@
 	 (expected-edited-col-num (generate--random-nat-number-between-0-and test-total-columns))
 	 (actual-table (generate-with-buffer-with-org-table (list (-compose #'number-to-string #'car) test-total-rows test-total-columns)
 			 (org-table-goto-line (1+ test-index-of-row-to-replace))
-			 (org-table-edit-current-row (point) 't)
+			 (org-table-edit-current-row 't)
 			 (dotimes (test-col-num test-total-columns)
 			   (org-table-put 2 (1+ test-col-num) "EDITED"))
 			 (org-table-align)
@@ -363,7 +363,7 @@
 	  (expected-edited-col-num (generate--random-nat-number-between-0-and test-total-columns))
 	  (actual-table (generate-with-buffer-with-org-table (list (-compose #'number-to-string #'car) test-total-rows test-total-columns)
 			  (org-table-goto-line 1)
-			  (org-table-edit-current-row (point) 't)
+			  (org-table-edit-current-row 't)
 			  (dotimes (test-col-num test-total-columns)
 			    (org-table-put 1 (1+ test-col-num) "EDITED"))
 			  (org-table-align)

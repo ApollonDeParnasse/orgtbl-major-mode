@@ -41,11 +41,6 @@
   :tag "orgtbl-major-mode"
   :group 'org)
 
-(defcustom orgtbl-major-mode-formatter nil
-  "Function used to format tables."
-  :type 'function
-  :group 'orgtbl-major-mode)
-
 (defcustom orgtbl-major-mode-save-on-edit-special-finish nil
   "Save tables on edit special finish."
   :type 'boolean
@@ -320,9 +315,9 @@ the value from BEG will be increment each time its pasted into a cell."
     (keymap-local-set "C-c C-k" (lambda () (interactive) (funcall #'org-table-finish-edit-rows start-row end-row added-header-to-selection-p original-buffer body-rows-as-list)))))
 
 ;;;###autoload
-(cl-defun org-table-edit-current-row (&optional point with-header)
-  (interactive (list (point) 't))
-  (let* ((line-start (org-table--get-current-table-line-start-point ))
+(cl-defun org-table-edit-current-row (&optional with-header)
+  (interactive (list 't))
+  (let* ((line-start (org-table--get-current-table-line-start-point))
 	 (line-end (org-table--get-current-table-line-end-point)))
     (org-table-edit-rows line-start line-end with-header)))
 
