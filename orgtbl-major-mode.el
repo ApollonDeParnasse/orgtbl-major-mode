@@ -31,8 +31,9 @@
 (require 'org)
 (require 'org-table)
 (require 'org-macs)
-(require 'org-element)
+(require 'org-compat)
 (require 'generator)
+(require 'thunk)
 (require 'pcase)
 (require 'seq)
 
@@ -43,6 +44,12 @@
 
 (defcustom orgtbl-major-mode-save-on-edit-special-finish nil
   "Save tables on edit special finish."
+  :type 'boolean
+  :group 'orgtbl-major-mode)
+
+(defcustom orgtbl-major-mode-place-cursor-in-first-empty-cell t
+  "Place cursor in the first empty cell of the table when
+the edit special buffer is opened."
   :type 'boolean
   :group 'orgtbl-major-mode)
 
@@ -95,25 +102,25 @@
   ;;:abbrev-table org-mode-abbrev-table
   :interactive t
   (cl-letf (((symbol-function 'org-table-begin)
-	    (symbol-function 'point-min))
+	     (symbol-function 'point-min))
 	    ((symbol-function 'org-table-end)
-	    (symbol-function 'point-max)))
+	     (symbol-function 'point-max)))
     (orgtbl-major-mode-defun)))
 
 (defsubst org--no-properties-and-trim (s &optional restricted)
-"Remove all text properties from string S and then trim the result.
+  "Remove all text properties from string S and then trim the result.
 When RESTRICTED is non-nil, only remove the properties listed
  in `org-rm-props'."
-(if restricted (remove-text-properties 0 (length s) org-rm-props s)
-  (set-text-properties 0 (length s) nil s))
-(org-trim s))
+  (if restricted (remove-text-properties 0 (length s) org-rm-props s)
+    (set-text-properties 0 (length s) nil s))
+  (org-trim s))
 
 (defsubst org-current-line-string-no-properties (&optional to-here)
   "Return current line, as a string.
 If optional argument TO-HERE is non-nil, return string from
 beginning of line up to point."
   (buffer-substring-no-properties (line-beginning-position)
-		    (if to-here (point) (line-end-position))))
+				  (if to-here (point) (line-end-position))))
 
 (defsubst org-table--goto-row-and-get-begin-pos (line)
   (org-table-goto-line line)
@@ -195,6 +202,45 @@ beginning of line up to point."
     (goto-char (line-end-position))
     (search-backward "|")))
 
+(defsubst org-table--get-cell-index ()
+  (let* ((curr-row (1- (org-table-current-line)))
+	 (curr-column (1- (org-table-current-column)))
+	 (total-cols (org-table--count-cols)))
+    (+ curr-column (* curr-row total-cols))))
+
+(defsubst org-table--get-next-cell-row-column (total-rows
+					       total-columns
+					       row-column)
+  (thunk-let ((row (car row-column))
+	      (column (cadr row-column)))
+    (cond
+     ((equal row-column (list total-rows total-columns))
+      row-column)
+     ((< column total-columns) (list row (+ column 1)))
+     (t (list (+ row 1) 1)))))
+
+(defsubst org-table--get-previous-cell-row-column (total-rows
+						   total-columns
+						   row-column)
+  (thunk-let ((row (car row-column))
+	      (column (cadr row-column)))
+    (cond
+     ((equal row-column (list 1 1))
+      (list 1 1))
+     ((equal row-column (list total-rows
+			      total-columns))
+      (list row column))
+     ((equal column 1) (list (1- row) total-columns))
+     (t (list row (1- column))))))
+
+(defun org-table--goto-cell-index (cell-index)
+  (let* ((total-cols (org-table--count-cols))
+	 (total-rows (org-table--count-rows))
+	 (row-num (floor cell-index total-cols))
+	 (col-num (mod cell-index total-cols))
+	 (row-col (mapcar #'1+ (list row-num col-num))))
+    (apply #'org-table--goto-row-column row-col)))
+
 ;; window-start, window-end, window-scroll-functions hook jit-lock-register
 
 ;; incrementing + prefix arguments are next
@@ -215,7 +261,7 @@ the value from BEG will be increment each time its pasted into a cell."
 	 (rows (1+ (abs (- beg-row end-row))))
 	 (left-or-right? (org-table--get-fill-direction beg-col end-col))
 	 (up-or-down? (org-table--get-fill-direction beg-row end-row)))
-    (with-undo-amalgamate
+    (org-with-undo-amalgamate
       (dotimes (row rows)
 	(let ((line (funcall up-or-down? beg-row row)))
 	  (dotimes (column columns)
@@ -227,13 +273,21 @@ the value from BEG will be increment each time its pasted into a cell."
 
 (iter-defun org-table--create-table-iterator (rows cols &optional start)
   (let* ((total-cells (* rows cols))
-	 (max-col-num (1+ cols))
 	 (current-col 1)
 	 (current-row 0)
 	 (start-row (or start 1)))
     (dotimes (cell-num total-cells)
       (setq current-col (1+ (mod cell-num cols))
 	    current-row (+ (floor cell-num cols) start-row))
+      (iter-yield (list current-row current-col)))))
+
+(iter-defun org-table--create-reverse-iterator (rows cols)
+  (let* ((total-cells (* rows cols))
+	 (current-col cols)
+	 (current-row rows))
+    (dotimes (cell-num total-cells)
+      (setq current-col (- cols (mod cell-num cols))
+	    current-row (- rows (floor cell-num cols)))
       (iter-yield (list current-row current-col)))))
 
 (defun org-table--map-cells (func)
@@ -260,8 +314,10 @@ the value from BEG will be increment each time its pasted into a cell."
 (defun org-table-get-rows-as-list (start-row end-row)
   (let ((rows)
 	(cols (org-table--count-cols)))
-    (org-table--map-selected-rows (pcase-lambda (`(,row ,col)) (push (org-table-get row col) rows)) (list start-row end-row) 'nil)
-      (seq-split (reverse rows) cols)))
+    (org-table--map-selected-rows (pcase-lambda (`(,row ,col))
+				    (push (org-table-get row col) rows))
+				  (list start-row end-row) 'nil)
+    (seq-split (reverse rows) cols)))
 
 (defun org-table--replace-selected-rows-helper (new-values previous-values start-row)
   (if previous-values
@@ -269,41 +325,121 @@ the value from BEG will be increment each time its pasted into a cell."
     (pcase-lambda (`(,row ,col))
       (let* ((previous-cell-value (nth (1- col) (nth (- row start-row) previous-values)))
 	     (new-cell-value (nth (1- col) (nth (- row start-row) new-values))))
-	(unless (equal new-cell-value previous-cell-value)
+	(unless (string-equal new-cell-value previous-cell-value)
 	  (org-table-put row col new-cell-value))))))
 
 (cl-defun org-table-replace-selected-rows ((start-row end-row) new-values &optional previous-values)
   (org-table--map-selected-rows (org-table--replace-selected-rows-helper new-values previous-values start-row) (list start-row end-row)))
 
 (cl-defun org-table-map-cells (func)
-  (org-table--map-cells (pcase-lambda (`(,row ,col)) (org-table-put row col (funcall func (org-table-get row col))))))
+  (org-table--map-cells
+   (pcase-lambda (`(,row ,col))
+     (org-table-put row col
+		    (funcall func (org-table-get row col))))))
 
 (cl-defun org-table-map-selected-rows (func (start-row end-row))
-  (org-table--map-selected-rows (pcase-lambda (`(,row ,col)) (org-table-put row col (funcall func (org-table-get row col)))) (list start-row end-row)))
+  (org-table--map-selected-rows
+   (pcase-lambda (`(,row ,col))
+     (org-table-put row col
+		    (funcall func (org-table-get row col))))
+   (list start-row end-row)))
 
-(cl-defun org-table-finish-edit-rows (start-row end-row added-header-to-selection-p original-buffer original-cell-values &optional (save-on-finish orgtbl-major-mode-save-on-edit-special-finish))
+(defalias 'org-table--remove-hlines-from-list
+  (apply-partially #'seq-remove
+		   (apply-partially #'equal 'hline)))
+
+(cl-defun org-table-replace-region (start-row end-row new-rows &optional (align t))
+  (let* ((org-table-automatic-realign nil)
+	 (start (progn (org-table-goto-line start-row)
+		       (line-beginning-position)))
+	 (end (if (equal start-row end-row)
+		  (line-end-position)
+		(org-table--goto-row-and-get-end-pos
+		 end-row))))
+    (progn
+      (delete-region start end)
+      (insert new-rows)
+      (and align (org-table-align)))))
+
+(defun org-table-goto-first-empty-cell-in-table ()
+  (interactive)
+  (unless (org-at-table-p)
+    (user-error "Not at a table"))
+  (let* ((table (org-table--remove-hlines-from-list
+		 (org-table-to-lisp)))
+	 (rows (length table))
+	 (cols (length (car table)))
+	 (iter (org-table--create-table-iterator rows cols)))
+    (cl-labels ((cell-is-not-empty ((current-row current-col))
+		  (thread-last table
+			       (nth (1- current-row))
+			       (nth (1- current-col))
+			       (funcall (lambda (cell-val)
+					  (length> cell-val 0)))))
+		(get-first-empty-cell (iterator)
+		  (let ((next-corr (condition-case end
+				       (iter-next iterator)
+				     (iter-end-of-sequence
+				      :end))))
+		    (cond
+		     ((equal :end next-corr) (list rows cols))
+		     ((cell-is-not-empty next-corr)
+		      (get-first-empty-cell iterator))
+		     (t next-corr)))))
+      (thread-last iter
+		   get-first-empty-cell
+		   (apply #'org-table--goto-row-column)))))
+
+(cl-defun org-table--finish-edit-rows (start-row
+				       end-row
+				       added-header-to-selection-p
+				       original-buffer
+				       original-point
+				       &optional
+				       (save-on-finish
+					orgtbl-major-mode-save-on-edit-special-finish))
   (interactive)
   (progn
     (goto-char (point-min))
-    (org-table-begin))
-  (let* ((edit-buffer-cells (seq-remove (apply-partially #'equal 'hline) (org-table-to-lisp)))
-	 (cells-to-add (if added-header-to-selection-p (last edit-buffer-cells (1- (length edit-buffer-cells))) edit-buffer-cells)))
+    (org-table-begin)
+    (when added-header-to-selection-p
+      (org-table-goto-line 2)))
+  (let* ((new-rows (buffer-substring-no-properties
+		    (line-beginning-position)
+		    (org-table-end))))
     (switch-to-buffer original-buffer)
     (kill-buffer "*Org Table Edit Field*")
-    (org-table-replace-selected-rows (list start-row end-row) cells-to-add original-cell-values)
+    (org-table-replace-region
+     start-row end-row (org-trim new-rows))
+    (goto-char original-point)
     (when save-on-finish
       (save-buffer original-buffer))))
 
+(defun org-table--cancel-edit-rows (original-buffer original-point)
+  (switch-to-buffer original-buffer)
+  (kill-buffer "*Org Table Edit Field*")
+  (goto-char original-point))
+
 ;;;###autoload
-(cl-defun org-table-edit-rows (beg end &optional with-header)
+(cl-defun org-table-edit-rows (beg end &optional with-header
+				   (place-index-in-first-empty-cell
+				    orgtbl-major-mode-place-cursor-in-first-empty-cell))
   (interactive (list (region-beginning) (region-end) 't))
-  (let* ((start-row (org-table--goto-char-and-get-line-number beg))
+  (let* ((original-point (point))
+	 (start-row (org-table--goto-char-and-get-line-number beg))
 	 (end-row (org-table--goto-char-and-get-line-number end))
 	 (added-header-to-selection-p (and with-header (> start-row 1)))
-	 (body-rows (if (equal start-row end-row) (org-table--get-line-as-string start-row) (org-table--get-rows-as-string start-row end-row)))
-	 (body-rows-as-list (org-table-get-rows-as-list start-row end-row))
-	 (hline (if (and added-header-to-selection-p (org-table--contains-hlines)) (concat (org-table--get-table-hline) "\n") ""))
-	 (rows (if added-header-to-selection-p (concat (org-table--get-line-as-string 1) "\n" hline body-rows) body-rows))
+	 (body-rows (if (equal start-row end-row)
+			(org-table--get-line-as-string start-row)
+		      (org-table--get-rows-as-string start-row end-row)))
+	 (hline (if (and added-header-to-selection-p
+			 (org-table--contains-hlines))
+		    (concat (org-table--get-table-hline) "\n")
+		  ""))
+	 (rows (if added-header-to-selection-p
+		   (concat (org-table--get-line-as-string 1)
+			   "\n" hline body-rows)
+		 body-rows))
 	 (original-buffer (current-buffer)))
     (pop-to-buffer "*Org Table Edit Field*")
     (erase-buffer)
@@ -311,15 +447,36 @@ the value from BEG will be increment each time its pasted into a cell."
     (orgtbl-major-mode)
     (org-table-begin)
     (org-table-align)
-    (message "Edit Rows and finish with C-c C-k")
-    (keymap-local-set "C-c C-k" (lambda () (interactive) (funcall #'org-table-finish-edit-rows start-row end-row added-header-to-selection-p original-buffer body-rows-as-list)))))
+    (and place-index-in-first-empty-cell
+	 (org-table-goto-first-empty-cell-in-table))
+    (keymap-local-set "C-c '"
+		      (lambda () (interactive)
+			(funcall #'org-table--finish-edit-rows
+				 start-row
+				 end-row
+				 added-header-to-selection-p
+				 original-buffer
+				 original-point)))
+    (keymap-local-set "C-c C-k" (lambda () (interactive)
+				  (funcall
+				   #'org-table--cancel-edit-rows
+				   original-buffer
+				   original-point)))
+    (setq header-line-format
+	  " Edit, then exit with C-c ' or abort with C-c C-k")
+    (message "Edit Rows and finish with C-c '")))
 
 ;;;###autoload
-(cl-defun org-table-edit-current-row (&optional with-header)
+(cl-defun org-table-edit-current-row (&optional with-header
+						(place-index-in-first-empty-cell
+						 orgtbl-major-mode-place-cursor-in-first-empty-cell))
   (interactive (list 't))
   (let* ((line-start (org-table--get-current-table-line-start-point))
 	 (line-end (org-table--get-current-table-line-end-point)))
-    (org-table-edit-rows line-start line-end with-header)))
+    (org-table-edit-rows
+     line-start
+     line-end with-header
+     place-index-in-first-empty-cell)))
 
 (defun org-table-narrow-to-first-x-rows (n)
   (interactive "n")
