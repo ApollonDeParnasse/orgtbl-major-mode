@@ -30,9 +30,7 @@
 (require 'org-table)
 (require 'orgtbl-major-mode)
 (require 'generator)
-(load "~/.config/emacs/lib/generate/generate-macs.el")
-(load "~/.config/emacs/lib/generate/generate-file-extensions.el")
-(load "~/.config/emacs/lib/generate/generate.el")
+(require 'generate)
 
 (generate-ert-deftest-n-times org-table-autofill-string-right ()
   :num-runs 100

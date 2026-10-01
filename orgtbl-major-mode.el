@@ -235,7 +235,6 @@ beginning of line up to point."
 
 (defun org-table--goto-cell-index (cell-index)
   (let* ((total-cols (org-table--count-cols))
-	 (total-rows (org-table--count-rows))
 	 (row-num (floor cell-index total-cols))
 	 (col-num (mod cell-index total-cols))
 	 (row-col (mapcar #'1+ (list row-num col-num))))
@@ -377,7 +376,7 @@ the value from BEG will be increment each time its pasted into a cell."
 			       (funcall (lambda (cell-val)
 					  (length> cell-val 0)))))
 		(get-first-empty-cell (iterator)
-		  (let ((next-corr (condition-case end
+		  (let ((next-corr (condition-case _end
 				       (iter-next iterator)
 				     (iter-end-of-sequence
 				      :end))))
